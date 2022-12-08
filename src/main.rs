@@ -94,6 +94,7 @@ struct DbConfig {
     port: u64,
     username: String,
     password: String,
+    database: String,
 }
 
 async fn db_main(args: DbArgs) {
@@ -114,8 +115,12 @@ async fn db_main(args: DbArgs) {
             })
         })
         .connect_lazy(&format!(
-            "mysql://{}:{}@{}:{}",
-            db_config.username, db_config.password, db_config.host, db_config.port
+            "mysql://{}:{}@{}:{}/{}",
+            db_config.username,
+            db_config.password,
+            db_config.host,
+            db_config.port,
+            db_config.database,
         ))
         .expect("error building pool");
 
