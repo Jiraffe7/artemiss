@@ -95,6 +95,7 @@ struct DbConfig {
     username: String,
     password: String,
     database: String,
+    properties: Option<String>,
 }
 
 async fn db_main(args: DbArgs) {
@@ -115,12 +116,13 @@ async fn db_main(args: DbArgs) {
             })
         })
         .connect_lazy(&format!(
-            "mysql://{}:{}@{}:{}/{}",
+            "mysql://{}:{}@{}:{}/{}?{}",
             db_config.username,
             db_config.password,
             db_config.host,
             db_config.port,
             db_config.database,
+            db_config.properties.unwrap_or_else(|| "".to_owned()),
         ))
         .expect("error building pool");
 
