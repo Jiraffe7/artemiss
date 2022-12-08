@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.0.29", features = ["derive"] }
 env_logger = "0.10.0"
+figment = { version = "0.10.8", features = ["env"] }
 log = "0.4.17"
 reqwest = { version = "0.11.13", features = ["json"] }
+serde = { version = "1.0.149", features = ["derive"] }
+sqlx = { version = "0.6.2", features = ["mysql", "runtime-tokio-rustls"] }
 tokio = { version = "1.23.0", features = ["full"] }
