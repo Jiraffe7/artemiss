@@ -1,11 +1,13 @@
 use std::time::Duration;
 
 use clap::{command, Parser, Subcommand};
-use figment::{providers::Env, Figment};
+use figment::{
+    providers::{Env, Serialized},
+    Figment,
+};
 use log::{debug, error};
 use reqwest::ClientBuilder;
-use serde::Deserialize;
-use sqlx::mysql::MySqlPoolOptions;
+use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, time};
 
 #[derive(Parser, Debug)]
@@ -22,7 +24,7 @@ enum Commands {
     Db(DbArgs),
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Serialize, Deserialize)]
 struct HttpArgs {
     /// Set a timeout for only the connect phase of a `Client`.
     #[arg(long, default_value_t = 15)]
@@ -55,18 +57,8 @@ struct HttpArgs {
     parallel: usize,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Serialize, Deserialize)]
 struct DbArgs {
-    /// Set a timeout for idle connections being kept-alive.
-    /// The default is set to effectively have no idle connections in the pool.
-    #[arg(long, default_value_t = 1)]
-    pool_idle_timeout_us: u64,
-
-    /// Set a max lifetime for connections.
-    /// The default is set to effectively have no idle connections in the pool.
-    #[arg(long, default_value_t = 1)]
-    pool_max_lifetime_us: u64,
-
     /// Set a timeout for only the connect phase of a connection.
     #[arg(long, default_value_t = 15)]
     connect_timeout_ms: u64,
@@ -74,6 +66,14 @@ struct DbArgs {
     /// Interval of sending requests.
     #[arg(long, default_value_t = 100)]
     interval_ms: u64,
+
+    /// Number of workers to run in parallel.
+    #[arg(long, default_value_t = 1)]
+    parallel: usize,
+
+    /// Database connection string to connect to.
+    /// DATABASE_URL environment variable used by default.
+    database_url: Option<String>,
 }
 
 #[tokio::main]
@@ -88,63 +88,66 @@ async fn main() {
     }
 }
 
-#[derive(Deserialize, Debug)]
-struct DbConfig {
-    host: String,
-    port: u64,
-    username: String,
-    password: String,
-    database: String,
-    properties: Option<String>,
-}
-
 async fn db_main(args: DbArgs) {
-    let db_config: DbConfig = Figment::new()
-        .merge(Env::prefixed("DB_"))
+    dotenvy::dotenv().ok();
+
+    let args: DbArgs = Figment::new()
+        .merge(Env::prefixed("ARTEMISS_")) // Environment variables take precedence.
+        .join(Serialized::defaults(args))
         .extract()
-        .expect("error extracting DB config");
+        .expect("error parsing environment for config");
 
-    let pool = MySqlPoolOptions::new()
-        .max_connections(1)
-        .idle_timeout(Duration::from_micros(args.pool_idle_timeout_us))
-        .max_lifetime(Duration::from_micros(args.pool_max_lifetime_us))
-        .acquire_timeout(Duration::from_millis(args.connect_timeout_ms))
-        .after_connect(|_, _| {
-            Box::pin(async {
-                debug!("connection created");
-                Ok(())
-            })
-        })
-        .connect_lazy(&format!(
-            "mysql://{}:{}@{}:{}/{}?{}",
-            db_config.username,
-            db_config.password,
-            db_config.host,
-            db_config.port,
-            db_config.database,
-            db_config.properties.unwrap_or_else(|| "".to_owned()),
-        ))
-        .expect("error building pool");
+    let url = args.database_url.expect("DATABASE_URL not found");
 
-    let mut interval = time::interval(Duration::from_millis(args.interval_ms));
-    loop {
-        interval.tick().await;
+    let builder = mysql::OptsBuilder::from_opts(mysql::Opts::from_url(&url).unwrap())
+        .tcp_connect_timeout(Duration::from_millis(args.connect_timeout_ms).into())
+        .ssl_opts(mysql::SslOpts::default());
 
-        match pool.acquire().await {
-            Ok(conn) => {
-                let _ = conn.detach();
+    let (send, mut recv) = mpsc::channel::<()>(1);
+
+    for _ in 0..args.parallel {
+        let builder = builder.clone();
+        let done = send.clone();
+
+        tokio::spawn(async move {
+            let _done = done;
+            let mut interval = time::interval(Duration::from_millis(args.interval_ms));
+
+            loop {
+                interval.tick().await;
+
+                match mysql::Conn::new(builder.clone().ssl_opts(mysql::SslOpts::default())) {
+                    Ok(mut conn) => {
+                        if conn.ping() {
+                            debug!("mysql connection ping successful")
+                        } else {
+                            debug!("mysql connection ping failed")
+                        }
+                    }
+                    Err(e) => {
+                        error!(
+                            "mysql connection create error: {}. connect_timeout={}ms",
+                            e, args.connect_timeout_ms
+                        )
+                    }
+                }
             }
-            Err(e) => {
-                error!(
-                    "connection acquire error: {}. connect_timeout={}ms",
-                    e, args.connect_timeout_ms
-                )
-            }
-        }
+        });
     }
+
+    drop(send);
+    let _ = recv.recv().await;
 }
 
 async fn http_main(args: HttpArgs) {
+    dotenvy::dotenv().ok();
+
+    let args: HttpArgs = Figment::new()
+        .merge(Env::prefixed("ARTEMISS_")) // Environment variables take precedence.
+        .join(Serialized::defaults(args))
+        .extract()
+        .expect("error parsing environment for config");
+
     // Create a client for every worker so that they do not benefit from pooling
     let clients: Vec<_> = (0..args.parallel)
         .into_iter()
