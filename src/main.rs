@@ -125,7 +125,8 @@ async fn db_main(args: DbArgs) {
             loop {
                 interval.tick().await;
 
-                match mysql::Conn::new(builder.clone()) {
+                let builder = builder.clone();
+                tokio::task::spawn_blocking(move || match mysql::Conn::new(builder) {
                     Ok(mut conn) => {
                         if conn.ping() {
                             debug!("mysql connection ping successful")
@@ -139,7 +140,7 @@ async fn db_main(args: DbArgs) {
                             e, args.connect_timeout_ms
                         )
                     }
-                }
+                });
             }
         });
     }
