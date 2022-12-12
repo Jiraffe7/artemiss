@@ -73,6 +73,7 @@ struct DbArgs {
 
     /// Database connection string to connect to.
     /// DATABASE_URL environment variable used by default.
+    #[arg(long)]
     database_url: Option<String>,
 }
 
