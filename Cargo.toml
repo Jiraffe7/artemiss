@@ -11,7 +11,7 @@ dotenvy = "0.15.6"
 env_logger = "0.10.0"
 figment = { version = "0.10.8", features = ["env"] }
 log = "0.4.17"
-mysql = "23.0.0"
+mysql = { version = "23.0.0", default-features = false, features = ["minimal", "rustls-tls"]}
 reqwest = { version = "0.11.13", features = ["json"] }
 serde = { version = "1.0.149", features = ["derive"] }
 tokio = { version = "1.23.0", features = ["full"] }
