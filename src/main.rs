@@ -125,7 +125,7 @@ async fn db_main(args: DbArgs) {
             loop {
                 interval.tick().await;
 
-                match mysql::Conn::new(builder.clone().ssl_opts(mysql::SslOpts::default())) {
+                match mysql::Conn::new(builder.clone()) {
                     Ok(mut conn) => {
                         if conn.ping() {
                             debug!("mysql connection ping successful")
