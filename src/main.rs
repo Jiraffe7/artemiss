@@ -75,6 +75,10 @@ struct DbArgs {
     /// DATABASE_URL environment variable used by default.
     #[arg(long)]
     database_url: Option<String>,
+
+    /// Insecure connection
+    #[arg(long)]
+    insecure: bool,
 }
 
 #[tokio::main]
@@ -102,7 +106,11 @@ async fn db_main(args: DbArgs) {
 
     let builder = mysql::OptsBuilder::from_opts(mysql::Opts::from_url(&url).unwrap())
         .tcp_connect_timeout(Duration::from_millis(args.connect_timeout_ms).into())
-        .ssl_opts(mysql::SslOpts::default());
+        .ssl_opts(if args.insecure {
+            None
+        } else {
+            Some(mysql::SslOpts::default())
+        });
 
     let (send, mut recv) = mpsc::channel::<()>(1);
 
